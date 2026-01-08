@@ -249,6 +249,13 @@ class AccountReportBudgetItem(models.Model):
     @api.depends('account_id', 'date', 'percentage_adj')
     def _compute_budget_logic(self):
         for record in self:
+            if self.env.context.get('bypass_accounting') or not float_is_zero(record.last_year_balance,
+                                                                              precision_digits=2):
+                # Solo calculamos el importe final basado en el saldo que ya tenemos
+                incremento = record.last_year_balance * record.percentage_adj
+                record.amount = record.last_year_balance + incremento
+                continue
+
             if not float_is_zero(record.last_year_balance, precision_digits=2):
                 incremento = record.last_year_balance * record.percentage_adj
                 record.amount = record.last_year_balance + incremento
