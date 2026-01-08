@@ -126,10 +126,14 @@ class AccountReportBudget(models.Model):
             })
             _logger.info("Nueva cabecera creada ID: %s", new_budget.id)
 
+            # Contador para limitar los logs de las líneas
+            line_count = 0
+
             for line in budget.item_ids:
-                # DEBUG: Ver los valores de la línea original
-                _logger.info("--- Procesando Línea ID: %s ---", line.id)
-                _logger.info("Valores origen: Cuenta=%s, Importe Actual=%s", line.account_id.name, line.amount)
+                # Solo logueamos el primer ítem
+                if line_count == 0:
+                    _logger.info("--- Procesando SOLO EL PRIMER ÍTEM para Debug ---")
+                    _logger.info("Valores origen: Cuenta=%s, Importe Actual=%s", line.account_id.name, line.amount)
 
                 # Preparamos los valores para el create
                 vals = {
@@ -141,15 +145,20 @@ class AccountReportBudget(models.Model):
                     'amount': line.amount,
                 }
 
-                _logger.info("Enviando a CREATE: %s", vals)
+                if line_count == 0:
+                    _logger.info("Enviando a CREATE (Primer Item): %s", vals)
 
-                # Creamos con contexto para saltar la lógica contable
+                # Creamos con contexto para saltar la lógica contable (esto se hace para todos)
                 new_line = self.env['account.report.budget.item'].with_context(bypass_accounting=True).create(vals)
 
-                _logger.info("Nueva línea creada con ID: %s. Saldo guardado: %s", new_line.id,
-                             new_line.last_year_balance)
+                if line_count == 0:
+                    _logger.info("Nueva línea creada ID: %s. Saldo guardado: %s", new_line.id,
+                                 new_line.last_year_balance)
+                    _logger.info("--- Fin de logs detallados por línea ---")
 
-        _logger.info("=== FIN DE PROYECCIÓN ===")
+                line_count += 1
+
+        _logger.info("=== FIN DE PROYECCIÓN (Total líneas procesadas: %s) ===", line_count)
 
         return {
             'type': 'ir.actions.act_window',
