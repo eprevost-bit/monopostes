@@ -108,43 +108,56 @@ from odoo import models, fields, api
 from datetime import date
 
 from odoo.tools import float_is_zero
-
+import logging
+_logger = logging.getLogger(__name__)
 
 class AccountReportBudget(models.Model):
     _inherit = 'account.report.budget'
 
     def action_duplicate_with_projection(self):
-        """
-        Esta es la Acción de Servidor:
-        Duplica el presupuesto y convierte importes en saldos anteriores.
-        """
+        _logger.info("=== INICIO DE PROYECCIÓN DE PRESUPUESTO ===")
+        _logger.info("Presupuesto origen ID: %s - Nombre: %s", self.id, self.name)
+
         for budget in self:
             # 1. Creamos la cabecera nueva
             new_budget = budget.copy({
                 'name': budget.name + " (Proyectado)",
-                'item_ids': [], # Empezamos con líneas vacías
+                'item_ids': [],
             })
+            _logger.info("Nueva cabecera creada ID: %s", new_budget.id)
 
             for line in budget.item_ids:
-                # 2. Creamos cada línea manualmente
-                # Usamos 'with_context' para decirle al compute: "¡No busques en la contabilidad!"
-                self.env['account.report.budget.item'].with_context(bypass_accounting=True).create({
+                # DEBUG: Ver los valores de la línea original
+                _logger.info("--- Procesando Línea ID: %s ---", line.id)
+                _logger.info("Valores origen: Cuenta=%s, Importe Actual=%s", line.account_id.name, line.amount)
+
+                # Preparamos los valores para el create
+                vals = {
                     'budget_id': new_budget.id,
                     'account_id': line.account_id.id,
                     'date': line.date,
-                    'last_year_balance': line.amount, # <--- AQUÍ: El importe viejo es el saldo nuevo
+                    'last_year_balance': line.amount,  # El importe viejo es el saldo nuevo
                     'percentage_adj': 0.0,
-                    'amount': line.amount, # Inicialmente coinciden
-                })
+                    'amount': line.amount,
+                }
 
-            # 3. Abrir el nuevo registro
-            return {
-                'type': 'ir.actions.act_window',
-                'res_model': 'account.report.budget',
-                'view_mode': 'form',
-                'res_id': new_budget.id,
-                'target': 'current',
-            }
+                _logger.info("Enviando a CREATE: %s", vals)
+
+                # Creamos con contexto para saltar la lógica contable
+                new_line = self.env['account.report.budget.item'].with_context(bypass_accounting=True).create(vals)
+
+                _logger.info("Nueva línea creada con ID: %s. Saldo guardado: %s", new_line.id,
+                             new_line.last_year_balance)
+
+        _logger.info("=== FIN DE PROYECCIÓN ===")
+
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': 'account.report.budget',
+            'view_mode': 'form',
+            'res_id': new_budget.id,
+            'target': 'current',
+        }
 
 
 class AccountReportBudgetItem(models.Model):
