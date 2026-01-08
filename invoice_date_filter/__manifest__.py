@@ -1,6 +1,6 @@
 {
     'name': 'Filtro de Rango de Fechas en Facturas',
-    'version': '19.0.1.0.0',
+    'version': '0.1',
     'category': 'Accounting',
     'summary': 'Agrega búsqueda por fecha inicio y fin en facturas',
     'description': """
