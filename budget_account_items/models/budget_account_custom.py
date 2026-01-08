@@ -115,25 +115,27 @@ class AccountReportBudget(models.Model):
     _inherit = 'account.report.budget'
 
     def action_duplicate_with_projection(self):
-        _logger.info("=== INICIO DE PROYECCIÓN (SIN DUPLICADOS) ===")
+        _logger.info("=== INICIO DE PROYECCIÓN (CONTROL TOTAL) ===")
 
         for budget in self:
-            # 1. Creamos la cabecera nueva, pero forzamos item_ids a estar vacío
-            # Usamos [(5, 0, 0)] para asegurar que Odoo no copie las líneas viejas
-            new_budget = budget.copy({
+            # 1. Creamos el registro NUEVO directamente, sin usar copy()
+            # Aquí mapeamos los campos de la cabecera que quieras conservar
+            new_budget = self.env['account.report.budget'].create({
                 'name': budget.name + " (Proyectado)",
-                'item_ids': [(5, 0, 0)],
+                'company_id': budget.company_id.id,
+                # 'date_from': budget.date_from, # Añade aquí los campos que necesites
+                # 'date_to': budget.date_to,
+                # Asegúrate de no incluir item_ids aquí
             })
-            _logger.info("Nueva cabecera creada ID: %s sin líneas automáticas", new_budget.id)
+            _logger.info("Nueva cabecera creada manualmente ID: %s", new_budget.id)
 
             for line in budget.item_ids:
-                # Creamos la línea manualmente con el valor del importe anterior
-                # Usamos bypass_accounting para que el compute no nos borre el valor
+                # 2. Creamos las líneas una a una
                 self.env['account.report.budget.item'].with_context(bypass_accounting=True).create({
                     'budget_id': new_budget.id,
                     'account_id': line.account_id.id,
                     'date': line.date,
-                    'last_year_balance': line.amount,  # El importe actual pasa a ser el saldo anterior
+                    'last_year_balance': line.amount,
                     'percentage_adj': 0.0,
                     'amount': line.amount,
                 })
