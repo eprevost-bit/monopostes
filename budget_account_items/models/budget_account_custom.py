@@ -115,50 +115,30 @@ class AccountReportBudget(models.Model):
     _inherit = 'account.report.budget'
 
     def action_duplicate_with_projection(self):
-        _logger.info("=== INICIO DE PROYECCIÓN DE PRESUPUESTO ===")
-        _logger.info("Presupuesto origen ID: %s - Nombre: %s", self.id, self.name)
+        _logger.info("=== INICIO DE PROYECCIÓN (SIN DUPLICADOS) ===")
 
         for budget in self:
-            # 1. Creamos la cabecera nueva
+            # 1. Creamos la cabecera nueva, pero forzamos item_ids a estar vacío
+            # Usamos [(5, 0, 0)] para asegurar que Odoo no copie las líneas viejas
             new_budget = budget.copy({
                 'name': budget.name + " (Proyectado)",
-                'item_ids': [],
+                'item_ids': [(5, 0, 0)],
             })
-            _logger.info("Nueva cabecera creada ID: %s", new_budget.id)
-
-            # Contador para limitar los logs de las líneas
-            line_count = 0
+            _logger.info("Nueva cabecera creada ID: %s sin líneas automáticas", new_budget.id)
 
             for line in budget.item_ids:
-                # Solo logueamos el primer ítem
-                if line_count == 0:
-                    _logger.info("--- Procesando SOLO EL PRIMER ÍTEM para Debug ---")
-                    _logger.info("Valores origen: Cuenta=%s, Importe Actual=%s", line.account_id.name, line.amount)
-
-                # Preparamos los valores para el create
-                vals = {
+                # Creamos la línea manualmente con el valor del importe anterior
+                # Usamos bypass_accounting para que el compute no nos borre el valor
+                self.env['account.report.budget.item'].with_context(bypass_accounting=True).create({
                     'budget_id': new_budget.id,
                     'account_id': line.account_id.id,
                     'date': line.date,
-                    'last_year_balance': line.amount,  # El importe viejo es el saldo nuevo
+                    'last_year_balance': line.amount,  # El importe actual pasa a ser el saldo anterior
                     'percentage_adj': 0.0,
                     'amount': line.amount,
-                }
+                })
 
-                if line_count == 0:
-                    _logger.info("Enviando a CREATE (Primer Item): %s", vals)
-
-                # Creamos con contexto para saltar la lógica contable (esto se hace para todos)
-                new_line = self.env['account.report.budget.item'].with_context(bypass_accounting=True).create(vals)
-
-                if line_count == 0:
-                    _logger.info("Nueva línea creada ID: %s. Saldo guardado: %s", new_line.id,
-                                 new_line.last_year_balance)
-                    _logger.info("--- Fin de logs detallados por línea ---")
-
-                line_count += 1
-
-        _logger.info("=== FIN DE PROYECCIÓN (Total líneas procesadas: %s) ===", line_count)
+        _logger.info("=== FIN DE PROYECCIÓN ===")
 
         return {
             'type': 'ir.actions.act_window',
