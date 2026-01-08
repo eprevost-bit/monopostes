@@ -114,19 +114,18 @@ class AccountReportBudget(models.Model):
     _inherit = 'account.report.budget'
 
     def action_proyectar_presupuesto(self):
-        """
-        Botón para el Header: Duplica el presupuesto completo
-        y proyecta los importes de todas las líneas.
-        """
         self.ensure_one()
-        # Creamos la copia de la cabecera
+        # Creamos la copia con un contexto especial 'is_projection'
         nuevo_presupuesto = self.copy({
             'name': self.name + " (Proyectado)",
-            'item_ids': [], # Limpiamos líneas para procesarlas una a una
+            'item_ids': [],
         })
 
         for linea in self.item_ids:
-            linea.copy({'budget_id': nuevo_presupuesto.id})
+            # Pasamos el contexto a la línea para que el compute sepa qué hacer
+            linea.with_context(is_projection=True).copy({
+                'budget_id': nuevo_presupuesto.id
+            })
 
         return {
             'type': 'ir.actions.act_window',
@@ -145,6 +144,7 @@ class AccountReportBudgetItem(models.Model):
         compute="_compute_budget_logic",
         store=True,
         copy=True,
+        readonly=False,  # Importante para que acepte el valor de copy
         digits=(16, 2)
     )
 
@@ -176,9 +176,8 @@ class AccountReportBudgetItem(models.Model):
 
     def copy(self, default=None):
         default = default or {}
-        # Al duplicar, queremos que el 'importe' del viejo sea el 'saldo anterior' del nuevo
+        # Tomamos el importe actual para el saldo anterior del nuevo
         default['last_year_balance'] = self.amount
-        # Reseteamos el incremento para que el usuario empiece de cero sobre la nueva base
         default['percentage_adj'] = 0.0
         return super(AccountReportBudgetItem, self).copy(default)
 
@@ -222,38 +221,37 @@ class AccountReportBudgetItem(models.Model):
 
     percentage_adj = fields.Float(string="% Incremento", default=0.0)
 
-    @api.depends('account_id', 'date', 'percentage_adj')
+    @api.depends('account_id', 'date', 'percentage_adj', 'last_year_balance')
     def _compute_budget_logic(self):
         for record in self:
-            if not float_is_zero(record.last_year_balance, precision_digits=2):
+            # --- EL CANDADO ---
+            # Si estamos proyectando o el campo ya tiene un valor (inyectado por copy)
+            # calculamos el importe directamente sin ir a buscar a la contabilidad.
+            if self.env.context.get('is_projection') or not float_is_zero(record.last_year_balance, precision_digits=2):
                 incremento = record.last_year_balance * record.percentage_adj
                 record.amount = record.last_year_balance + incremento
                 continue
 
+            # Búsqueda normal en contabilidad (solo si no hay saldo previo)
             if record.account_id and record.date:
-                if float_is_zero(record.last_year_balance, precision_digits=2):
-                    last_year = record.date.year - 1
-                    date_from = date(last_year, 1, 1)
-                    date_to = date(last_year, 12, 31)
+                last_year = record.date.year - 1
+                date_from = date(last_year, 1, 1)
+                date_to = date(last_year, 12, 31)
 
-                    domain = [
-                        ('account_id', '=', record.account_id.id),
-                        ('date', '>=', date_from),
-                        ('date', '<=', date_to),
-                        ('move_id.state', '=', 'posted')
-                    ]
+                domain = [
+                    ('account_id', '=', record.account_id.id),
+                    ('date', '>=', date_from),
+                    ('date', '<=', date_to),
+                    ('move_id.state', '=', 'posted')
+                ]
 
-                    aml_data = self.env['account.move.line'].read_group(
-                        domain, ['balance'], ['account_id']
-                    )
+                aml_data = self.env['account.move.line'].read_group(
+                    domain, ['balance'], ['account_id']
+                )
 
-                    raw_balance = aml_data[0]['balance'] if aml_data else 0.0
-                    record.last_year_balance = raw_balance
-
-                total_last_year = record.last_year_balance
-                incremento = total_last_year * record.percentage_adj
-                record.amount = total_last_year + incremento
-
+                raw_balance = aml_data[0]['balance'] if aml_data else 0.0
+                record.last_year_balance = raw_balance
+                record.amount = raw_balance + (raw_balance * record.percentage_adj)
             else:
                 record.last_year_balance = 0.0
                 record.amount = 0.0
