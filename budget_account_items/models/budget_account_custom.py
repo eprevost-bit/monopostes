@@ -115,32 +115,31 @@ class AccountReportBudget(models.Model):
     _inherit = 'account.report.budget'
 
     def action_duplicate_with_projection(self):
-        _logger.info("=== INICIO DE PROYECCIÓN (CONTROL TOTAL) ===")
+        _logger.info("=== INICIO DE PROYECCIÓN (CON RECÁLCULO DE SALDOS) ===")
 
         for budget in self:
-            # 1. Creamos el registro NUEVO directamente, sin usar copy()
-            # Aquí mapeamos los campos de la cabecera que quieras conservar
+            # 1. Crear la nueva cabecera
             new_budget = self.env['account.report.budget'].create({
                 'name': budget.name + " (Proyectado)",
                 'company_id': budget.company_id.id,
-                # 'date_from': budget.date_from, # Añade aquí los campos que necesites
-                # 'date_to': budget.date_to,
-                # Asegúrate de no incluir item_ids aquí
             })
-            _logger.info("Nueva cabecera creada manualmente ID: %s", new_budget.id)
 
             for line in budget.item_ids:
-                # 2. Creamos las líneas una a una
-                self.env['account.report.budget.item'].with_context(bypass_accounting=True).create({
+
+                self.env['account.report.budget.item'].create({
                     'budget_id': new_budget.id,
                     'account_id': line.account_id.id,
                     'date': line.date,
-                    'last_year_balance': line.amount,
-                    'percentage_adj': 0.0,
-                    'amount': line.amount,
-                })
 
-        _logger.info("=== FIN DE PROYECCIÓN ===")
+                    'percentage_adj': 0.0,  # Empezamos sin incremento
+
+                    # Al poner 0, el sistema busca en contabilidad (ej. encuentra 1000)
+                    'last_year_balance': 0.0,
+
+                    # Al poner 0, el sistema calcula: 1000 + (0%) = 1000.
+                    # El resultado final será que Importe = Saldo Año Anterior.
+                    'amount': 0.0,
+                })
 
         return {
             'type': 'ir.actions.act_window',
