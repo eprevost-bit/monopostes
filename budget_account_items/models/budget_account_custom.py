@@ -189,13 +189,17 @@ class AccountReportBudgetItem(models.Model):
         digits=(16, 2)
     )
 
-    def copy(self, default=None):
-        default = default or {}
-        # Al duplicar, queremos que el 'importe' del viejo sea el 'saldo anterior' del nuevo
-        default['last_year_balance'] = self.amount
-        # Reseteamos el incremento para que el usuario empiece de cero sobre la nueva base
-        default['percentage_adj'] = 0.0
-        return super(AccountReportBudgetItem, self).copy(default)
+    @api.model
+    def create(self, vals):
+        record = super(AccountReportBudgetItem, self).create(vals)
+        if float_is_zero(record.last_year_balance, precision_digits=2) and \
+                record.account_id and record.date and \
+                not self.env.context.get('bypass_accounting'):
+            record._compute_budget_logic()
+            record._compute_importe_ui()
+            record._compute_balance_ui()
+
+        return record
 
     def _inverse_balance_ui(self):
         for record in self:
@@ -240,45 +244,34 @@ class AccountReportBudgetItem(models.Model):
     @api.depends('account_id', 'date', 'percentage_adj')
     def _compute_budget_logic(self):
         for record in self:
-            if self.env.context.get('bypass_accounting') or not float_is_zero(record.last_year_balance,
-                                                                              precision_digits=2):
-                # Solo calculamos el importe final basado en el saldo que ya tenemos
+            if self.env.context.get('bypass_accounting') or \
+                    not float_is_zero(record.last_year_balance, precision_digits=2):
                 incremento = record.last_year_balance * record.percentage_adj
                 record.amount = record.last_year_balance + incremento
                 continue
-
-            if not float_is_zero(record.last_year_balance, precision_digits=2):
-                incremento = record.last_year_balance * record.percentage_adj
-                record.amount = record.last_year_balance + incremento
-                continue
+            fetched_balance = 0.0
 
             if record.account_id and record.date:
-                if float_is_zero(record.last_year_balance, precision_digits=2):
-                    last_year = record.date.year - 1
-                    date_from = date(last_year, 1, 1)
-                    date_to = date(last_year, 12, 31)
+                last_year = record.date.year - 1
+                date_from = date(last_year, 1, 1)
+                date_to = date(last_year, 12, 31)
 
-                    domain = [
-                        ('account_id', '=', record.account_id.id),
-                        ('date', '>=', date_from),
-                        ('date', '<=', date_to),
-                        ('move_id.state', '=', 'posted')
-                    ]
+                domain = [
+                    ('account_id', '=', record.account_id.id),
+                    ('date', '>=', date_from),
+                    ('date', '<=', date_to),
+                    ('move_id.state', '=', 'posted')
+                ]
 
-                    aml_data = self.env['account.move.line'].read_group(
-                        domain, ['balance'], ['account_id']
-                    )
+                aml_data = self.env['account.move.line'].read_group(
+                    domain, ['balance'], ['account_id']
+                )
 
-                    raw_balance = aml_data[0]['balance'] if aml_data else 0.0
-                    record.last_year_balance = raw_balance
-
-                total_last_year = record.last_year_balance
-                incremento = total_last_year * record.percentage_adj
-                record.amount = total_last_year + incremento
-
-            else:
-                record.last_year_balance = 0.0
-                record.amount = 0.0
+                if aml_data:
+                    fetched_balance = aml_data[0]['balance']
+            record.last_year_balance = fetched_balance
+            incremento = fetched_balance * record.percentage_adj
+            record.amount = fetched_balance + incremento
 
 
     @api.onchange('amount')
