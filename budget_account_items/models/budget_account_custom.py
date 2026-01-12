@@ -120,7 +120,7 @@ class AccountReportBudget(models.Model):
         for budget in self:
             # 1. Crear la nueva cabecera
             new_budget = self.env['account.report.budget'].create({
-                'name': budget.name + " (Proyectado)",
+                'name': budget.name + " (Duplicado)",
                 'company_id': budget.company_id.id,
             })
 
